@@ -13,6 +13,14 @@ function toMojoCentralState(state) {
   }
 }
 
+// Canonicalizes UUIDs and converts them to Mojo UUIDs.
+function canonicalizeAndConvertToMojoUUID(uuids) {
+  uuids.forEach((val, i, arr) => {
+    uuids[i] = {uuid: BluetoothUUID.getService(val)};
+  });
+  return uuids;
+}
+
 // Mapping of the property names of
 // BluetoothCharacteristicProperties defined in
 // https://webbluetoothcg.github.io/web-bluetooth/#characteristicproperties
@@ -43,7 +51,6 @@ function ArrayToMojoCharacteristicProperties(arr) {
 
   return struct;
 }
-
 
 class FakeBluetooth {
   constructor() {
@@ -110,20 +117,31 @@ class FakeCentral {
   async simulatePreconnectedPeripheral({
     address, name, knownServiceUUIDs = []}) {
 
-    // Canonicalize and convert to mojo UUIDs.
-    knownServiceUUIDs.forEach((val, i, arr) => {
-      knownServiceUUIDs[i] = {uuid: BluetoothUUID.getService(val)};
-    });
-
     await this.fake_central_ptr_.simulatePreconnectedPeripheral(
-      address, name, knownServiceUUIDs);
+      address, name, canonicalizeAndConvertToMojoUUID(knownServiceUUIDs));
 
+    return this.fetchOrCreatePeripheral_(address);
+  }
+
+  // Simulates an advertisement packet described by |scanResult| being received
+  // from a device. If central is currently scanning, the device will appear on
+  // the list of discovered devices.
+  async simulateAdvertisementReceived(scanResult) {
+    scanResult.scanRecord.uuids = canonicalizeAndConvertToMojoUUID(
+        scanResult.scanRecord.uuids);
+    await this.fake_central_ptr_.simulateAdvertisementReceived(
+        new bluetooth.mojom.ScanResult(scanResult));
+
+    return this.fetchOrCreatePeripheral_(scanResult.deviceAddress);
+  }
+
+  // Create a fake_peripheral object from the given address.
+  fetchOrCreatePeripheral_(address) {
     let peripheral = this.peripherals_.get(address);
     if (peripheral === undefined) {
       peripheral = new FakePeripheral(address, this.fake_central_ptr_);
       this.peripherals_.set(address, peripheral);
     }
-
     return peripheral;
   }
 }
